@@ -1,45 +1,69 @@
 open! Core
 module Article = String
-module Network = struct
-  (* We can represent our social network graph as a set of connections, where
-     a connection represents a friendship between two people. *)
-  module Connection = struct
-    module T = struct
-      type t = Article.t * Article.t [@@deriving compare, sexp]
+(* We separate out the [Network] module to represent our social network in
+   OCaml types. *)
+   module Network = struct
+    (* We can represent our social network graph as a set of connections, where
+       a connection represents a friendship between two people. *)
+    module Connection = struct
+      module T = struct
+        type t = Article.t * Article.t [@@deriving compare, sexp]
+      end
+  
+      (* This funky syntax is necessary to implement sets of [Connection.t]s.
+         This is needed to defined our [Network.t] type later. Using this
+         [Comparable.Make] functor also gives us immutable maps, which might
+         come in handy later. *)
+      include Comparable.Make (T)
     end
-
-    (* This funky syntax is necessary to implement sets of [Connection.t]s.
-       This is needed to defined our [Network.t] type later. Using this
-       [Comparable.Make] functor also gives us immutable maps, which might
-       come in handy later. *)
-    include Comparable.Make (T)
-
-    let of_string s =
-      match String.split s ~on:',' with
-      | [ x; y ] -> Some (Article.of_string x, Article.of_string y)
-      | _ -> None
-    ;;
+  
+    (* let rec connect city_list =
+      match city_list with
+      | head :: tail ->
+        List.concat_map tail ~f:(fun city -> [ head, city; city, head ])
+        @ connect tail
+      | [] -> []
+    ;; *)
+  
+    (* let handle_line csv_line =
+      match String.split csv_line ~on:',' with
+      | [] -> []
+      | _ :: tail -> connect tail
+    ;; *)
+  
     type t = Connection.Set.t [@@deriving sexp_of]
-
-    let of_file input_file =
+  
+    (* let of_file input_file =
       let connections =
         In_channel.read_lines (File_path.to_string input_file)
-        |> List.concat_map ~f:(fun s ->
-          match Connection.of_string s with
-          | Some (a, b) ->
-            (* Friendships are mutual; a connection between a and b means we
-               should also consider the connection between b and a. *)
-            [ a, b; b, a ]
-          | None ->
-            printf
-              "ERROR: Could not parse line as connection; dropping. %s\n"
-              s;
-            [])
+        |> List.concat_map ~f:(fun str -> handle_line str)
+        (* match Connection.of_string str with | Some (a, b) -> (* Connections
+           are mutual; a connection between a and b means we should also
+           consider the connection between b and a. *) [ a, b; b, a ] | None ->
+           printf "ERROR: Could not parse line as connection; dropping. %s\n"
+           s; []) *)
       in
       Connection.Set.of_list connections
-    ;;
+    ;; *)
   end
 
+module G = Graph.Imperative.Graph.Concrete (Article)
+module Dot = Graph.Graphviz.Dot (struct
+    include G
+
+    (* These functions can be changed to tweak the appearance of the
+       generated graph. Check out the ocamlgraph graphviz API
+       (https://github.com/backtracking/ocamlgraph/blob/master/src/graphviz.mli)
+       for examples of what values can be set here. *)
+    let edge_attributes _ = [ `Dir `Forward]
+    let default_edge_attributes _ = []
+    let get_subgraph _ = None
+    let vertex_attributes v = [ `Shape `Box; `Label v; `Fillcolor 1000 ]
+    let vertex_name v = sprintf {|"%s"|} v
+    let default_vertex_attributes _ = []
+    let graph_attributes _ = []
+  end)
+  
 (* [get_linked_articles] should return a list of wikipedia article lengths contained in
    the input.
 
@@ -77,14 +101,73 @@ let print_links_command =
         List.iter (get_linked_articles contents) ~f:print_endline]
 ;;
 
+(* let to_depth_n_graph (depth : int) ~article : Article.t list =
+  let visited = Article.Hash_set.create () in
+  let q = Queue.create () in
+  Queue.enqueue q (article, 0);
+  let rec traverse () =
+    match Queue.dequeue q with
+    | None -> ()
+    | Some node ->
+      let linked_articles = get_linked_articles article 
+      in
+      let linked_articles_tpls = List.map linked_articles ~f:(fun linked_article -> (linked_article, depth+1)) in
+      List.iter linked_articles_tpls ~f:(fun neighbor ->
+        if not (Hash_set.mem visited (get_article neighbor)) && (get_depth neighbor) < depth then Queue.enqueue q neighbor);
+      Hash_set.add visited (get_article node);
+      traverse ()
+  in
+  traverse ();
+  Hash_set.to_list visited;; *)
+
+  module Article_info = struct
+    type t = {
+      name : string;
+      depth : int;
+    }
+  end
+
 (* [visualize] should explore all linked articles up to a distance of [max_depth] away
    from the given [origin] article, and output the result as a DOT file. It should use the
    [how_to_fetch] argument along with [File_fetcher] to fetch the articles so that the
    implementation can be tested locally on the small dataset in the ../resources/wiki
    directory. *)
 let visualize ?(max_depth = 3) ~origin ~output_file ~how_to_fetch () : unit =
-  how_to_fetch 
+    let graph = G.create () in
+    let visited = Article.Hash_set.create () in
+    let q = Queue.create () in
+    let origin_info = {Article_info.name = origin; depth = 0} in
+    Queue.enqueue q origin_info;
+    let rec traverse () =
+      let dequeued_node = Queue.dequeue q in
+      match dequeued_node with
+      | None -> ()
+      | Some {name = article_name; depth = article_depth} ->
+        File_fetcher.fetch_exn how_to_fetch 
+        let linked_articles = get_linked_articles article_name in
+        let linked_articles_info = List.map linked_articles ~f:(fun linked_article_name -> {Article_info.name = linked_article_name; depth = article_depth+1}) in
+        List.iter linked_articles_info ~f:(fun neighbor_info -> (
+          if (neighbor_info.depth) <= max_depth then (
+            G.add_edge graph ((neighbor_info.name)) (article_name);
+            if not (Hash_set.mem visited (neighbor_info.name)) then 
+              (Queue.enqueue q neighbor_info);
+        )
+        )
+        );
+        Hash_set.add visited article_name;
+        traverse ()
+    in
+    traverse ();
+    (* Hash_set.to_list visited in
+        Set.iter network ~f:(fun (city1, city2) ->
+          (* [G.add_edge] auomatically adds the endpoints as vertices in the
+             graph if they don't already exist. *)
+          G.add_edge graph city1 city2); *)
+        Dot.output_graph
+          (Out_channel.create (File_path.to_string output_file))
+          graph;
 ;;
+
 
   
 let visualize_command =

@@ -46,6 +46,10 @@ module Article = String
       Connection.Set.of_list connections
     ;; *)
   end
+  let get_title contents : string =
+    let _ = printf "%s\n" contents in
+    let name_list = String.split ~on:'/' contents in
+    List.last_exn name_list ^ " - Wikipedia"
 
 module G = Graph.Imperative.Graph.Concrete (Article)
 module Dot = Graph.Graphviz.Dot (struct
@@ -132,6 +136,7 @@ let print_links_command =
    [how_to_fetch] argument along with [File_fetcher] to fetch the articles so that the
    implementation can be tested locally on the small dataset in the ../resources/wiki
    directory. *)
+
 let visualize ?(max_depth = 3) ~origin ~output_file ~how_to_fetch () : unit =
     let graph = G.create () in
     let visited = Article.Hash_set.create () in
@@ -143,18 +148,16 @@ let visualize ?(max_depth = 3) ~origin ~output_file ~how_to_fetch () : unit =
       match dequeued_node with
       | None -> ()
       | Some {name = article_name; depth = article_depth} ->
-        File_fetcher.fetch_exn how_to_fetch 
-        let linked_articles = get_linked_articles article_name in
-        let linked_articles_info = List.map linked_articles ~f:(fun linked_article_name -> {Article_info.name = linked_article_name; depth = article_depth+1}) in
+        let linked_articles = get_linked_articles (File_fetcher.fetch_exn how_to_fetch ~resource:article_name) in
+        let linked_articles_info = List.map linked_articles ~f:(fun linked_article_doc -> {Article_info.name = linked_article_doc; depth = article_depth+1}) in
         List.iter linked_articles_info ~f:(fun neighbor_info -> (
-          if (neighbor_info.depth) <= max_depth then (
-            G.add_edge graph ((neighbor_info.name)) (article_name);
-            if not (Hash_set.mem visited (neighbor_info.name)) then 
+          if (neighbor_info.depth) <= max_depth && not (Hash_set.mem visited (neighbor_info.name)) then (
               (Queue.enqueue q neighbor_info);
-        )
+        );
+        G.add_edge graph (get_title article_name) (get_title neighbor_info.name);
         )
         );
-        Hash_set.add visited article_name;
+        Hash_set.add visited (article_name);
         traverse ()
     in
     traverse ();

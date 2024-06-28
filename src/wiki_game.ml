@@ -94,6 +94,11 @@ let get_linked_articles contents : string list =
   |> List.dedup_and_sort ~compare:(String.compare)
 ;;
 
+let correct_url url (how_to_fetch : File_fetcher.How_to_fetch.t) = 
+  match how_to_fetch with
+  | Remote -> url
+  | Local _ -> if (String.is_prefix url ~prefix:"https://en.wikipedia.org/") then url else "https://en.wikipedia.org/" ^ url
+
 let print_links_command =
   let open Command.Let_syntax in
   Command.basic
@@ -207,13 +212,34 @@ let visualize_command =
 
    [max_depth] is useful to limit the time the program spends exploring the graph. *)
 let find_path ?(max_depth = 3) ~origin ~destination ~how_to_fetch () =
-  ignore (max_depth : int);
-  ignore (origin : string);
-  ignore (destination : string);
-  ignore (how_to_fetch : File_fetcher.How_to_fetch.t);
-  failwith "TODO"
+  let correct_origin = correct_url origin how_to_fetch in
+  let correct_destination = correct_url destination how_to_fetch in 
+  let visited = Article.Hash_set.create () in
+  let q = Queue.create () in
+  Queue.enqueue q ({Article_info.name = correct_origin; depth = 0}, [correct_origin]);
+  let rec traverse () =
+    match Queue.dequeue q with
+    | None -> None
+    | Some ({Article_info.name = n; depth = article_depth}, p)  ->
+      Hash_set.add visited n;
+      if (Article.equal n (correct_destination)) then Some (p @ [destination])
+      else 
+       (let article_html = (File_fetcher.fetch_exn Remote ~resource:n)
+      in
+      let neighbors = List.map (get_linked_articles article_html) ~f:(fun str -> correct_url str how_to_fetch) in
+      let unvisited_neighbors = (List.filter_map (neighbors) ~f:(fun article ->
+        if (not (Hash_set.mem visited article))
+          (* Option.is_none (Hashtbl.find visited ~f:(fun a -> Article.equal a article))  *)
+          then Some article else None)) in
+      List.iter unvisited_neighbors ~f:(fun neighbor ->
+        if not (Hash_set.mem visited neighbor && article_depth < max_depth) then 
+          Queue.enqueue q ({Article_info.name = neighbor; depth = article_depth + 1}, (p @ [neighbor]));
+      );
+      traverse ()
+      )
+  in
+  traverse ();
 ;;
-
 let find_path_command =
   let open Command.Let_syntax in
   Command.basic

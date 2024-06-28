@@ -79,30 +79,49 @@ let of_file input_file =
   let stk = Stack.create () in
   Stack.push stk s_pixel;
   let visited = Pixel.Hash_set.create () in
-  let rec traverse target path =
-    List.iter path ~f:(fun n -> print_s [%message (n : Pixel.t)]);
-    let popped_node = Stack.pop stk in
-    match popped_node with
-    | None ->
-      print_string "done\n";
-      []
-    | Some pxl ->
-      print_string "done\n";
-      Hash_set.add visited pxl;
-      if Pixel.equal pxl target
-      then (
-        print_string "found target!";
-        path @ [ target ])
-      else (
-        let neighbors = G.pred graph pxl in
-        (* code review: how do i prematurely stop iteration in the case that
-           i found a solution? imagine i was doing a linear search or smth *)
-        List.iter neighbors ~f:(fun neighbor ->
-          if not (Hash_set.mem visited neighbor) then Stack.push stk neighbor);
-        traverse pxl (path @ [ pxl ]))
+  let rec dfs g (origin : Pixel.t) (target : Pixel.t) =
+    let neighbors = G.pred g origin in
+    let unvisited_neighbors =
+      List.filter neighbors ~f:(fun v ->
+        not (Hash_set.exists visited ~f:(Pixel.equal v)))
+    in
+    let q = Queue.of_list unvisited_neighbors in
+    Hash_set.add visited origin;
+    let rec traverse () =
+      match Queue.dequeue q with
+      | Some neighbor ->
+        if Pixel.equal neighbor target
+        then [ origin; target ]
+        else (
+          (* List.iter (dfs g neighbor target) ~f:(fun v -> print_s [%message
+             (v : Pixel.t)]); *)
+          (* print_string "done printing\n"; *)
+          let possible_path = dfs g neighbor target in
+          let last_n = List.last possible_path in
+          if Option.is_some last_n
+             (* && Pixel.equal (Option.value ~default:origin last_n)
+                target *)
+          then [ origin ] @ possible_path
+          else traverse ())
+      | _ -> []
+    in
+    traverse ()
   in
-  traverse e_pixel []
+  (* List.iter (dfs graph s_pixel e_pixel) ~f:(fun v -> print_s [%message (v
+     : Pixel.t)]); print_string "solving maze!\n"; *)
+  dfs graph s_pixel e_pixel
 ;;
+
+(* let rec traverse target path = List.iter path ~f:(fun n -> print_s
+   [%message (n : Pixel.t)]); let popped_node = Stack.pop stk in match
+   popped_node with | None -> print_string "done\n"; [] | Some pxl ->
+   print_string "done\n"; Hash_set.add visited pxl; if Pixel.equal pxl target
+   then ( print_string "found target!"; path @ [ target ]) else ( let
+   neighbors = G.pred graph pxl in (* code review: how do i prematurely stop
+   iteration in the case that i found a solution? imagine i was doing a
+   linear search or smth *) List.iter neighbors ~f:(fun neighbor -> if not
+   (Hash_set.mem visited neighbor) then Stack.push stk neighbor); traverse
+   pxl (path @ [ pxl ])) in traverse e_pixel [] *)
 
 (* |> List.concat_map ~f:(fun s -> match Connection.of_string s with | Some
    (a, b) -> (* Friendships are mutual; a connection between a and b means we
